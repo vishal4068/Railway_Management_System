@@ -158,7 +158,7 @@ CREATE TABLE Booking (
     CONSTRAINT FK_BOOKING_TRAIN FOREIGN KEY (TrainID) REFERENCES Train(TrainID),
     CONSTRAINT chk_TravelDistance CHECK (TravelDistance >= 0),
     CONSTRAINT chk_TotalAmount CHECK (TotalAmount >= 0),
-    CONSTRAINT chk_NoOfPassenger CHECK (NoOfPassenger > 0 AND NoOfPassenger <= 6)
+    CONSTRAINT chk_NoOfPassenger CHECK (NoOfPassenger >= 0 AND NoOfPassenger <= 6)
     --CONSTRAINT chk_TravelDate CHECK (TravelDate >= SYSDATE)
 );
 
@@ -457,6 +457,9 @@ CREATE OR REPLACE PACKAGE RMS_Package AS
 
     -- Procedure to cancel a passenger
     PROCEDURE cancel_passenger(p_passenger_id NUMBER);
+
+    -- Procedure to cancel a booking
+    PROCEDURE cancel_booking(p_booking_id NUMBER);
 END RMS_Package;
 /
 
@@ -500,10 +503,12 @@ BEGIN
     RETURN v_fare_multiplier;
 END determine_fare_multiplier;
 
+--Find the minimum seat number that is not already assigned to a confirmed passenger.
 FUNCTION find_lowest_available_seat (
     p_coach_id NUMBER
 ) RETURN NUMBER IS
     v_seat_number NUMBER;
+BEGIN
     SELECT MIN(seat_no)
     INTO v_seat_number
     FROM (
@@ -582,7 +587,9 @@ BEGIN
     WHERE CoachID = v_coach_id;
  
     IF v_total_available_seats > 0 THEN
-        -- Find the lowest available seat number
+        --Check which seats are available
+        --Find the lowest available seat number
+        --and assign that seat to the waiting list passenger or new passenger
         v_seat_number := find_lowest_available_seat(v_coach_id);
         v_status := 'Confirmed';
  
@@ -592,7 +599,7 @@ BEGIN
         WHERE CoachID = v_coach_id;
  
     ELSE
-        -- Allocate waiting list number
+        -- Allocate waiting list number(if there is waiting list calculate next waiting list number if there is nothing in waiting list it start with 1)
         SELECT NVL(MAX(WaitingListNumber), 0) + 1
         INTO v_waiting_list_number
         FROM Passenger
@@ -719,6 +726,32 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
         ROLLBACK;
 END cancel_passenger;
+
+--Cancel booking
+PROCEDURE cancel_booking(p_booking_id NUMBER) IS
+    CURSOR c_passengers IS
+        SELECT PassengerID FROM Passenger
+        WHERE BookingID = p_booking_id AND Status != 'Cancelled';
+ 
+    v_passenger_id Passenger.PassengerID%TYPE;
+BEGIN
+    FOR rec IN c_passengers LOOP
+        BEGIN
+            -- Call the existing passenger cancel procedure
+            cancel_passenger(rec.PassengerID);
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('Failed to cancel passenger ID: ' || rec.PassengerID || ' - ' || SQLERRM);
+        END;
+    END LOOP;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('Booking ID not found.');
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error cancelling booking: ' || SQLERRM);
+        ROLLBACK;
+END cancel_booking;
  
 END RMS_Package;
 /
@@ -732,11 +765,12 @@ BEGIN
         p_from_station_id => 10001,
         p_to_station_id => 10004,
         p_travel_date => DATE '2025-04-23',
-        p_no_of_passenger => 2,
+        p_no_of_passenger => 6,
         p_class_type => 'GEN'
     );
 END;
 /
+
 
 --------------Inserting Passenger------------------
 
@@ -759,26 +793,26 @@ BEGIN
     passenger_ages(2) := 28;
     passenger_genders(2) := 'M';
 
-    -- passenger_names(3) := 'Aditya';
-    -- passenger_ages(3) := 34;
-    -- passenger_genders(3) := 'M';
+    passenger_names(3) := 'Aditya';
+    passenger_ages(3) := 34;
+    passenger_genders(3) := 'M';
 
-    -- passenger_names(4) := 'Sohel';
-    -- passenger_ages(4) := 28;
-    -- passenger_genders(4) := 'M';
+    passenger_names(4) := 'Sohel';
+    passenger_ages(4) := 28;
+    passenger_genders(4) := 'M';
 
-    -- passenger_names(5) := 'Kush';
-    -- passenger_ages(5) := 34;
-    -- passenger_genders(5) := 'M';
+    passenger_names(5) := 'Kush';
+    passenger_ages(5) := 34;
+    passenger_genders(5) := 'M';
 
-    -- passenger_names(6) := 'Rutik';
-    -- passenger_ages(6) := 34;
-    -- passenger_genders(6) := 'M';
+    passenger_names(6) := 'Rutik';
+    passenger_ages(6) := 34;
+    passenger_genders(6) := 'M';
 
     -- Loop through the arrays and call the procedure for each passenger
     FOR i IN 1 .. passenger_names.COUNT LOOP
         RMS_Package.Passenger_Details(
-            p_booking_id => 4002, -- Replace with your actual booking ID
+            p_booking_id => 4001, -- Replace with your actual booking ID
             p_classtype => 'GEN', -- Replace with the actual class type
             p_passenger_name => passenger_names(i),
             p_passenger_age => passenger_ages(i),
@@ -796,9 +830,15 @@ JOIN Coach c ON p.coachid=c.coachid;
 SELECT * FROM Coach;
 SELECT * FROM Cancellation;
 
---------------Cancellation------------------
+--------------Passenger Cancellation------------------
 BEGIN
     RMS_Package.cancel_passenger(p_passenger_id => 5001);
+END;
+/
+
+--------------Booking Cancellation------------------
+BEGIN
+    RMS_Package.cancel_booking(p_booking_id => 4001);
 END;
 /
 
